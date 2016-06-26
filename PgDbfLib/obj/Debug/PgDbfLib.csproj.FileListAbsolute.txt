@@ -1,0 +1,5 @@
+C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\PgDbfLib\bin\Debug\PgDbfLib.dll
+C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\PgDbfLib\bin\Debug\PgDbfLib.pdb
+C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\PgDbfLib\obj\Debug\PgDbfLib.dll
+C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\PgDbfLib\obj\Debug\PgDbfLib.pdb
+C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\PgDbfLib\obj\Debug\PgDbfLib.csprojResolveAssemblyReference.cache

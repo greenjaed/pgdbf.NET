@@ -1,8 +1,0 @@
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\bin\Debug\TestDriver.exe.config
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\bin\Debug\TestDriver.exe
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\bin\Debug\TestDriver.pdb
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\bin\Debug\PgDbfLib.dll
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\bin\Debug\PgDbfLib.pdb
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\obj\Debug\TestDriver.csprojResolveAssemblyReference.cache
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\obj\Debug\TestDriver.exe
-C:\Users\James\Documents\Visual Studio 2015\Projects\PgDbfLib\TestDriver\obj\Debug\TestDriver.pdb

@@ -1,2 +1,2 @@
 # pgdbf.NET
-A port of pgdbf to .NET
+A library port of pgdbf to .NET

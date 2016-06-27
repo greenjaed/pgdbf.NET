@@ -325,8 +325,12 @@ namespace PgDbfLib
             dbfFile.Seek(skipBytes, SeekOrigin.Current);
         }
 
-        private IEnumerable<string> getRows()
+        public IEnumerable<string> getRows()
         {
+            if (recordCount == 0)
+            {
+                getColumns();
+            }
             List<string> row;
             int rowLength = columns.Sum(c => c.Length);
             char[] rawRow = new char[rowLength];
@@ -367,8 +371,12 @@ namespace PgDbfLib
             }
         }
 
-        private string getColumns()
+        public string getColumns()
         {
+            if (fieldCount == 0)
+            {
+                readHeader();
+            }
             bool addColumn = IncludedColumns.Count == 0;
             List<string> columnNames = new List<string>();
             byte[] columnHeader = new byte[fieldArraySize];

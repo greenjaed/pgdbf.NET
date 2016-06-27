@@ -293,8 +293,7 @@ namespace PgDbfLib
             {
                 yield return string.Format("TRUNCATE TABLE {0};", TableName);
             }
-            yield return string.Format(@"COPY {0} FROM STDIN", TableName);
-            dbfFile.Seek(1, SeekOrigin.Current);
+            yield return string.Format("COPY {0} FROM STDIN", TableName);
             foreach (string row in getRows())
             {
                 yield return row;
@@ -330,36 +329,40 @@ namespace PgDbfLib
         {
             List<string> row;
             int rowLength = columns.Sum(c => c.Length);
-            char[] rowField = new char[columns.Max(c => c.Length)];
+            char[] rawRow = new char[rowLength];
+            string rowString;
+            char deleted;
             string fieldValue;
+            int fieldOffset;
             using (StreamReader rowReader = new StreamReader(dbfFile))
             {
                 for (int i = 0; i < recordCount; ++i)
                 {
-                    if ((char)rowReader.Read() == '*')
+                    deleted = (char)rowReader.Read();
+                    rowReader.Read(rawRow, 0, rowLength);
+                    if (deleted != '*')
                     {
-                        char[] deleted = new char[rowLength];
-                        rowReader.Read(deleted, 0, rowLength);
-                        continue;
-                    }
-                    row = new List<string>();
-                    foreach (var field in columns)
-                    {
-                        rowReader.Read(rowField, 0, field.Length);
-                        if (field.Export)
+                        fieldOffset = 0;
+                        rowString = new string(rawRow);
+                        row = new List<string>();
+                        foreach (var field in columns)
                         {
-                            fieldValue = new string(rowField, 0, field.Length).Replace("\0", string.Empty);
-                            if (field.Normalize != null)
+                            if (field.Export)
                             {
-                                row.Add(field.Normalize(fieldValue));
+                                fieldValue = rowString.Substring(fieldOffset, field.Length).Replace("\0", string.Empty);
+                                if (field.Normalize != null)
+                                {
+                                    row.Add(field.Normalize(fieldValue));
+                                }
+                                else
+                                {
+                                    row.Add(fieldValue);
+                                }
                             }
-                            else
-                            {
-                                row.Add(fieldValue);
-                            }
+                            fieldOffset += field.Length;
                         }
+                        yield return string.Join("\t", row);
                     }
-                    yield return string.Join("\t", row);
                 }
             }
         }
@@ -434,6 +437,7 @@ namespace PgDbfLib
                     columnNames.Add(columnName);
                 }
             }
+            dbfFile.Seek(1, SeekOrigin.Current);
             return string.Join(",", columnNames);
         }
     }

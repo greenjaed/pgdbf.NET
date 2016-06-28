@@ -118,6 +118,10 @@ namespace PgDbfLib
         /// </summary>
         public bool ConvertNumericToText { get; set; }
         /// <summary>
+        /// Indicates whether to convert boolean values to varchar.  Deafults to <value>false</value>.
+        /// </summary>
+        public bool ConvertBoolToVarChar { get; set; }
+        /// <summary>
         /// Indicates whether to wrap the sql dump in a transaction. Defaults to <value>true</value>.
         /// </summary>
         public bool WrapInTransaction { get; set; }
@@ -239,6 +243,10 @@ namespace PgDbfLib
                     {
                         Normalize = s => s == "Y" || s == "T" ? "t" : "f";
                     }
+                    else
+                    {
+                        Normalize = null;
+                    }
                 }
             }
             private char type;
@@ -251,6 +259,7 @@ namespace PgDbfLib
             createTable = true;
             dropTable = true;
             ConvertNumericToText = false;
+            ConvertBoolToVarChar = false;
             WrapInTransaction = true;
             PGSqlVersion = PgVersion.Pg8_2_And_Newer;
             IncludedColumns = new List<string>();
@@ -420,19 +429,22 @@ namespace PgDbfLib
                         else
                         {
                             numericDecimal = columnHeader[baseOffset + 17];
-                            if (numericDecimal == 0)
-                            {
-                                columnType = string.Format("NUMERIC({0})", column.Length);
-                            }
-                            else
-                            {
-                                columnType = string.Format("NUMERIC({0},{1})", column.Length, numericDecimal);
-                            }
+                            columnType = numericDecimal == 0 ?
+                                string.Format("NUMERIC({0})", column.Length) :
+                                string.Format("NUMERIC({0},{1})", column.Length, numericDecimal);
                         }
                     }
                     else if (column.Type == 'L')
                     {
-                        columnType = "BOOLEAN";
+                        if (ConvertBoolToVarChar)
+                        {
+                            column.Type = 'C';
+                            columnType = "VARCHAR(1)";
+                        }
+                        else
+                        {
+                            columnType = "BOOLEAN";
+                        }
                     }
                     else
                     {

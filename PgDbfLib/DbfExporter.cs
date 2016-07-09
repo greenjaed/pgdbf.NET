@@ -253,6 +253,9 @@ namespace PgDbfLib
             public Func<string, string> Normalize { get; private set; }
         }
 
+        /// <summary>
+        /// Initializes the DbfExporter
+        /// </summary>
         public DbfExporter()
         {
             truncateTable = false;
@@ -267,24 +270,21 @@ namespace PgDbfLib
             columns = new List<DbfColumn>();
         }
 
+        /// <summary>
+        /// Initializes the DbfExporter
+        /// </summary>
+        /// <param name="dbfFileName">The name of the Dbf file to export</param>
         public DbfExporter(string dbfFileName) : this()
         {
             DbfFileName = dbfFileName;
         }
 
         /// <summary>
-        /// Creates a PostGresql dump of the indicated dbf file.
+        /// Creates a PostGresql dump of the indicated dbf file
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Returns the script as an <see cref="IEnumerable{T}"/> where T is a <see cref="string"/>.</returns>
         public IEnumerable<string> GetPgScript()
         {
-            if (!File.Exists(DbfFileName))
-            {
-                throw new Exception("The Dbf File does not exist or is inaccessible");
-            }
-            ColumnRenames = ColumnRenames.ToDictionary(d => d.Key.ToUpper(), d => d.Value);
-            IncludedColumns = IncludedColumns.Select(s => s.ToUpper()).ToList();
-            dbfFile = new FileStream(dbfFileName, FileMode.Open, FileAccess.Read);
             readHeader();
             if (WrapInTransaction)
             {
@@ -295,7 +295,7 @@ namespace PgDbfLib
                 yield return string.Format("SET statement_timeout = 60000; DROP TABLE {0}{1};  SET statement_timeout=0;",
                     PGSqlVersion == PgVersion.Pg8_2_And_Newer ? "IF EXISTS " : string.Empty, TableName);
             }
-            string columnString = getColumns();
+            string columnString = GetColumnString();
             yield return CreateTable ? string.Format("CREATE TABLE {0} ({1});", TableName, columnString) :
                 columnString;
             if (TruncateTable)
@@ -303,7 +303,7 @@ namespace PgDbfLib
                 yield return string.Format("TRUNCATE TABLE {0};", TableName);
             }
             yield return string.Format("COPY {0} FROM STDIN", TableName);
-            foreach (string row in getRows())
+            foreach (string row in GetRows())
             {
                 yield return row;
             }
@@ -316,6 +316,11 @@ namespace PgDbfLib
 
         private void readHeader()
         {
+            if (!File.Exists(DbfFileName))
+            {
+                throw new Exception("The Dbf File does not exist or is inaccessible");
+            }
+            dbfFile = new FileStream(dbfFileName, FileMode.Open, FileAccess.Read);
             byte[] header = new byte[headerSize];
             dbfFile.Read(header, 0, headerSize);
             if (header[0] == 0x30)
@@ -334,11 +339,32 @@ namespace PgDbfLib
             dbfFile.Seek(skipBytes, SeekOrigin.Current);
         }
 
-        public IEnumerable<string> getRows()
+        /// <summary>
+        /// Gets all the Dbf Rows
+        /// </summary>
+        /// <returns>Returns the rows of a Dbf as an <see cref="IEnumerable{T}"/> where T is a <see cref="string"/></returns>
+        public IEnumerable<string> GetRows()
+        {
+            foreach (IEnumerable<IEnumerable<string>> row in GetRowFields())
+            {
+                yield return string.Join("\t", row);
+            }
+        }
+
+        /// <summary>
+        /// Gets all the rows and their fields from the Dbf
+        /// </summary>
+        /// <remarks>Because DbfExporter is forward-reading, duplicate calls to this method will throw an exception.</remarks>
+        /// <returns>Returns the rows and individual fields of a Dbf as an <see cref="IEnumerable{T}"/> of <see cref="IEnumerable{T}"/> where T is a <see cref="string"/>"/></returns>
+        public IEnumerable<IEnumerable<string>> GetRowFields()
         {
             if (recordCount == 0)
             {
-                getColumns();
+                GetColumns();
+            }
+            if (dbfFile == null)
+            {
+                throw new Exception("Rows have already been read");
             }
             List<string> row;
             int rowLength = columns.Sum(c => c.Length);
@@ -374,18 +400,39 @@ namespace PgDbfLib
                             }
                             fieldOffset += field.Length;
                         }
-                        yield return string.Join("\t", row);
+                        yield return row;
                     }
                 }
             }
+            dbfFile.Close();
         }
 
-        public string getColumns()
+        /// <summary>
+        /// Gets the column names
+        /// </summary>
+        /// <returns>Returns the columns of a Dbf as a single <see cref="string"/></returns>
+        public string GetColumnString()
+        {
+            return string.Join(",", GetColumns());
+        }
+
+        /// <summary>
+        /// Gets the column names
+        /// </summary>
+        /// <remarks>Because DbfExporter is forward-reading, duplicate calls to this method will throw an exception.</remarks>
+        /// <returns>Returns the columns of a Dbf as a <see cref="IEnumerable{T}"/> where T is a <see cref="string"/></returns>
+        public IEnumerable<string> GetColumns()
         {
             if (fieldCount == 0)
             {
                 readHeader();
             }
+            if (columns.Count > 0)
+            {
+                throw new Exception("Column names have already been read");
+            }
+            ColumnRenames = ColumnRenames.ToDictionary(d => d.Key.ToUpper(), d => d.Value);
+            IncludedColumns = IncludedColumns.Select(s => s.ToUpper()).ToList();
             bool addColumn = IncludedColumns.Count == 0;
             List<string> columnNames = new List<string>();
             byte[] columnHeader = new byte[fieldArraySize];
@@ -450,15 +497,18 @@ namespace PgDbfLib
                     {
                         columnType = string.Format("VARCHAR({0})", column.Length);
                     }
-                    columnNames.Add(columnName + " " + columnType);
+                    if (column.Export)
+                    {
+                        columnNames.Add(columnName + " " + columnType);
+                    }
                 }
-                else
+                else if (column.Export)
                 {
                     columnNames.Add(columnName);
                 }
             }
             dbfFile.Seek(1, SeekOrigin.Current);
-            return string.Join(",", columnNames);
+            return columnNames;
         }
     }
 }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       

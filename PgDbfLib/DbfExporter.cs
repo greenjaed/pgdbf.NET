@@ -354,7 +354,7 @@ namespace PgDbfLib
         /// <summary>
         /// Gets all the rows and their fields from the Dbf
         /// </summary>
-        /// <remarks>Because DbfExporter is forward-reading, duplicate calls to this method will throw an exception.</remarks>
+        /// <remarks>Because DbfExporter is forward-reading, calling this method multiple times will throw an exception.</remarks>
         /// <returns>Returns the rows and individual fields of a Dbf as an <see cref="IEnumerable{T}"/> of <see cref="IEnumerable{T}"/> where T is a <see cref="string"/>"/></returns>
         public IEnumerable<IEnumerable<string>> GetRowFields()
         {
@@ -419,7 +419,7 @@ namespace PgDbfLib
         /// <summary>
         /// Gets the column names
         /// </summary>
-        /// <remarks>Because DbfExporter is forward-reading, duplicate calls to this method will throw an exception.</remarks>
+        /// <remarks>Because DbfExporter is forward-reading, calling this method multiple times or calling it after <see cref="GetRowFields"/> will throw an exception.</remarks>
         /// <returns>Returns the columns of a Dbf as a <see cref="IEnumerable{T}"/> where T is a <see cref="string"/></returns>
         public IEnumerable<string> GetColumns()
         {

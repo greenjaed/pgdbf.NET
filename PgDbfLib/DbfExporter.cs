@@ -134,15 +134,21 @@ namespace PgDbfLib
         /// </summary>
         public Dictionary<string, string> ColumnRenames { get; private set; }
 
-        private long recordCount;
-        private int skipBytes;
-        private int fieldArraySize;
-        private int fieldCount;
-        private FileStream dbfFile;
-        private List<DbfColumn> columns;
-        private static int headerSize = 32;
-        private static int fieldDefinitionSize = 32;
-        private static string[] reservedWords = new string[]
+        private long RecordCount;
+        private int SkipBytes;
+        private int FieldArraySize;
+        private int FieldCount;
+        private int MemoBlockSize;
+        private FileStream DbfFile;
+        private FileStream MemoFile;
+        private List<DbfColumn> Columns;
+        private static int HeaderSize = 32;
+        private static int FieldDefinitionSize = 32;
+        private static int FieldNameLength = 11;
+        private static int FieldTypeOffset = 11;
+        private static int FieldLengthOffset = 16;
+        private static int FieldDecimalsOffset = 17;
+        private static string[] ReservedWords = new string[]
         {
             "all",
             "analyse",
@@ -225,33 +231,6 @@ namespace PgDbfLib
             "with",
             "",
         };
-        
-        private class DbfColumn
-        {
-            public bool Export { get; set; }
-            public int Length { get; set; }
-            public char Type
-            {
-                get
-                {
-                    return type;
-                }
-                set
-                {
-                    type = value;
-                    if (value == 'L')
-                    {
-                        Normalize = s => s == "Y" || s == "T" ? "t" : "f";
-                    }
-                    else
-                    {
-                        Normalize = null;
-                    }
-                }
-            }
-            private char type;
-            public Func<string, string> Normalize { get; private set; }
-        }
 
         /// <summary>
         /// Initializes the DbfExporter
@@ -267,7 +246,7 @@ namespace PgDbfLib
             PGSqlVersion = PgVersion.Pg8_2_And_Newer;
             IncludedColumns = new List<string>();
             ColumnRenames = new Dictionary<string, string>();
-            columns = new List<DbfColumn>();
+            Columns = new List<DbfColumn>();
         }
 
         /// <summary>
@@ -285,24 +264,24 @@ namespace PgDbfLib
         /// <returns>Returns the script as an <see cref="IEnumerable{T}"/> where T is a <see cref="string"/>.</returns>
         public IEnumerable<string> GetPgScript()
         {
-            readHeader();
+            ReadHeader();
             if (WrapInTransaction)
             {
                 yield return "BEGIN;";
             }
             if (DropTable)
             {
-                yield return string.Format("SET statement_timeout = 60000; DROP TABLE {0}{1};  SET statement_timeout=0;",
-                    PGSqlVersion == PgVersion.Pg8_2_And_Newer ? "IF EXISTS " : string.Empty, TableName);
+                yield return $"SET statement_timeout = 60000; DROP TABLE {(PGSqlVersion == PgVersion.Pg8_2_And_Newer ? "IF EXISTS " : string.Empty)}{TableName};" +
+                    "  SET statement_timeout=0;";
             }
             string columnString = GetColumnString();
-            yield return CreateTable ? string.Format("CREATE TABLE {0} ({1});", TableName, columnString) :
+            yield return CreateTable ? $"CREATE TABLE {TableName} ({columnString});" :
                 columnString;
             if (TruncateTable)
             {
-                yield return string.Format("TRUNCATE TABLE {0};", TableName);
+                yield return $"TRUNCATE TABLE {TableName};";
             }
-            yield return string.Format("COPY {0} FROM STDIN", TableName);
+            yield return $"COPY {TableName} FROM STDIN";
             foreach (string row in GetRows())
             {
                 yield return row;
@@ -314,29 +293,28 @@ namespace PgDbfLib
             }
         }
 
-        private void readHeader()
+        private void ReadHeader()
         {
             if (!File.Exists(DbfFileName))
             {
                 throw new Exception("The Dbf File does not exist or is inaccessible");
             }
-            dbfFile = new FileStream(dbfFileName, FileMode.Open, FileAccess.Read);
-            byte[] header = new byte[headerSize];
-            dbfFile.Read(header, 0, headerSize);
+            DbfFile = new FileStream(dbfFileName, FileMode.Open, FileAccess.Read);
+            byte[] header = new byte[HeaderSize];
+            DbfFile.Read(header, 0, HeaderSize);
             if (header[0] == 0x30)
             {
-                skipBytes = 263;
+                SkipBytes = 263;
             }
-            recordCount = BitConverter.ToUInt32(header, 4);
+            RecordCount = BitConverter.ToUInt32(header, 4);
             int headerLength = BitConverter.ToUInt16(header, 8);
-            fieldArraySize = headerLength - headerSize - skipBytes - 1;
-            if (fieldArraySize % fieldDefinitionSize == 1)
+            FieldArraySize = headerLength - HeaderSize - SkipBytes - 1;
+            if (FieldArraySize % FieldDefinitionSize == 1)
             {
-                ++skipBytes;
-                --fieldArraySize;
+                ++SkipBytes;
+                --FieldArraySize;
             }
-            fieldCount = fieldArraySize / fieldDefinitionSize;
-            dbfFile.Seek(skipBytes, SeekOrigin.Current);
+            FieldCount = FieldArraySize / FieldDefinitionSize;
         }
 
         /// <summary>
@@ -345,7 +323,7 @@ namespace PgDbfLib
         /// <returns>Returns the rows of a Dbf as an <see cref="IEnumerable{T}"/> where T is a <see cref="string"/></returns>
         public IEnumerable<string> GetRows()
         {
-            foreach (IEnumerable<IEnumerable<string>> row in GetRowFields())
+            foreach (IEnumerable<string> row in GetRowFields())
             {
                 yield return string.Join("\t", row);
             }
@@ -358,53 +336,48 @@ namespace PgDbfLib
         /// <returns>Returns the rows and individual fields of a Dbf as an <see cref="IEnumerable{T}"/> of <see cref="IEnumerable{T}"/> where T is a <see cref="string"/>"/></returns>
         public IEnumerable<IEnumerable<string>> GetRowFields()
         {
-            if (recordCount == 0)
+            if (RecordCount == 0)
             {
                 GetColumns();
             }
-            if (dbfFile == null)
+            if (DbfFile == null)
             {
                 throw new Exception("Rows have already been read");
             }
             List<string> row;
-            int rowLength = columns.Sum(c => c.Length);
-            char[] rawRow = new char[rowLength];
-            string rowString;
+            int rowLength = Columns.Sum(c => c.Length);
+            char[] stringRow = new char[rowLength];
+            byte[] rawRow = new byte[rowLength];
             char deleted;
-            string fieldValue;
-            int fieldOffset;
-            using (StreamReader rowReader = new StreamReader(dbfFile))
+            for (int i = 0; i < RecordCount; ++i)
             {
-                for (int i = 0; i < recordCount; ++i)
+                deleted = Convert.ToChar(DbfFile.ReadByte());
+                if (deleted == '*')
                 {
-                    deleted = (char)rowReader.Read();
-                    rowReader.Read(rawRow, 0, rowLength);
-                    if (deleted != '*')
+                    DbfFile.Seek(rowLength, SeekOrigin.Current);
+                    continue;
+                }
+                else
+                {
+                    DbfFile.Read(rawRow, 0, rowLength);
+                    row = new List<string>();
+                    foreach (var field in Columns)
                     {
-                        fieldOffset = 0;
-                        rowString = new string(rawRow);
-                        row = new List<string>();
-                        foreach (var field in columns)
+                        if (field.Export)
                         {
-                            if (field.Export)
-                            {
-                                fieldValue = rowString.Substring(fieldOffset, field.Length).Replace("\0", string.Empty);
-                                if (field.Normalize != null)
-                                {
-                                    row.Add(field.Normalize(fieldValue));
-                                }
-                                else
-                                {
-                                    row.Add(fieldValue);
-                                }
-                            }
-                            fieldOffset += field.Length;
+                            row.Add(field.ConvertRawValue(rawRow));
                         }
-                        yield return row;
                     }
+                    yield return row;
                 }
             }
-            dbfFile.Close();
+            if (MemoFile != null)
+            {
+                MemoFile.Close();
+                MemoFile.Dispose();
+            }
+            DbfFile.Close();
+            DbfFile.Dispose();
         }
 
         /// <summary>
@@ -423,11 +396,11 @@ namespace PgDbfLib
         /// <returns>Returns the columns of a Dbf as a <see cref="IEnumerable{T}"/> where T is a <see cref="string"/></returns>
         public IEnumerable<string> GetColumns()
         {
-            if (fieldCount == 0)
+            if (FieldCount == 0)
             {
-                readHeader();
+                ReadHeader();
             }
-            if (columns.Count > 0)
+            if (Columns.Count > 0)
             {
                 throw new Exception("Column names have already been read");
             }
@@ -435,50 +408,55 @@ namespace PgDbfLib
             IncludedColumns = IncludedColumns.Select(s => s.ToUpper()).ToList();
             bool addColumn = IncludedColumns.Count == 0;
             List<string> columnNames = new List<string>();
-            byte[] columnHeader = new byte[fieldArraySize];
-            dbfFile.Read(columnHeader, 0, fieldArraySize);
+            byte[] columnHeader = new byte[FieldArraySize];
+            DbfFile.Read(columnHeader, 0, FieldArraySize);
             int baseOffset;
             int numericDecimal;
-            string columnType;
-            for (int i = 0; i < fieldCount; ++i)
+            int columnOffset = 0;
+            string pgColumnType;
+            for (int i = 0; i < FieldCount; ++i)
             {
-                baseOffset = i*fieldDefinitionSize;
-                var column = new DbfColumn();
-                byte[] nameBytes = new byte[11];
-                Array.Copy(columnHeader, baseOffset, nameBytes, 0, 11);
+                baseOffset = i*FieldDefinitionSize;
+                byte[] nameBytes = new byte[FieldNameLength];
+                Array.Copy(columnHeader, baseOffset, nameBytes, 0, FieldNameLength);
                 string columnName = Encoding.ASCII.GetString(nameBytes).Replace("\0", string.Empty);
-                column.Export = IncludedColumns.Contains(columnName) || addColumn;
                 if (ColumnRenames.ContainsKey(columnName))
                 {
                     columnName = ColumnRenames[columnName];
                 }
-                if (reservedWords.Contains(columnName))
+                if (ReservedWords.Contains(columnName))
                 {
                     int increment = 0;
-                    while (IncludedColumns.Contains(string.Format("{0}_{1}", columnName, ++increment)));
-                    columnName = string.Format("{0}_{1}", columnName, increment);
+                    while (IncludedColumns.Contains($"{columnName}_{++increment}"));
+                    columnName = $"{columnName}_{increment}";
                 }
                 if (addColumn)
                 {
                     IncludedColumns.Add(columnName);
                 }
-                column.Type = Convert.ToChar(columnHeader[baseOffset + 11]);
-                column.Length = columnHeader[baseOffset + 16];
-                columns.Add(column);
+                var dbfColumnType = Convert.ToChar(columnHeader[baseOffset + FieldTypeOffset]);
+                DbfColumn column = dbfColumnType == 'M' ? new MemoColumn() : new DbfColumn();
+                column.Export = IncludedColumns.Contains(columnName) || addColumn;
+                column.Type = dbfColumnType;
+                column.Length = columnHeader[baseOffset + FieldLengthOffset];
+                column.Offset = columnOffset;
+                columnOffset += column.Length;
+                Columns.Add(column);
                 if (CreateTable)
                 {
-                    if (column.Type == 'N')
+                    pgColumnType = "TEXT";
+                    if (column.Type == 'N' || column.Type == 'F')
                     {
                         if (ConvertNumericToText)
                         {
-                            columnType = "TEXT";
+                            pgColumnType = "TEXT";
                         }
                         else
                         {
-                            numericDecimal = columnHeader[baseOffset + 17];
-                            columnType = numericDecimal == 0 ?
-                                string.Format("NUMERIC({0})", column.Length) :
-                                string.Format("NUMERIC({0},{1})", column.Length, numericDecimal);
+                            numericDecimal = columnHeader[baseOffset + FieldDecimalsOffset];
+                            pgColumnType = numericDecimal == 0 ?
+                                $"NUMERIC({column.Length})" :
+                                $"NUMERIC({column.Length},{numericDecimal})";
                         }
                     }
                     else if (column.Type == 'L')
@@ -486,20 +464,24 @@ namespace PgDbfLib
                         if (ConvertBoolToVarChar)
                         {
                             column.Type = 'C';
-                            columnType = "VARCHAR(1)";
+                            pgColumnType = "VARCHAR(1)";
                         }
                         else
                         {
-                            columnType = "BOOLEAN";
+                            pgColumnType = "BOOLEAN";
                         }
+                    }
+                    else if (column.Type == 'M')
+                    {
+                        pgColumnType = "TEXT";
                     }
                     else
                     {
-                        columnType = string.Format("VARCHAR({0})", column.Length);
+                        pgColumnType = $"VARCHAR({column.Length})";
                     }
                     if (column.Export)
                     {
-                        columnNames.Add(columnName + " " + columnType);
+                        columnNames.Add(columnName + " " + pgColumnType);
                     }
                 }
                 else if (column.Export)
@@ -507,8 +489,54 @@ namespace PgDbfLib
                     columnNames.Add(columnName);
                 }
             }
-            dbfFile.Seek(1, SeekOrigin.Current);
+            InitMemoFile();
+            DbfFile.Seek(SkipBytes + 1, SeekOrigin.Current);
             return columnNames;
+        }
+
+        private void InitMemoFile()
+        {
+            var memoColumns = Columns.Where(c => c.Export && c.Type == 'M');
+            if (memoColumns.Any())
+            {
+                string memoExtension;
+                int length = memoColumns.First().Length;
+                if (length == 4)
+                {
+                    memoExtension = ".fpt";
+                }
+                else if (length == 10)
+                {
+                    memoExtension = ".dbt";
+                    MemoBlockSize = 0x200; //standard block size for dbt files
+                }
+                else
+                {
+                    throw new Exception("Invalid memo field");
+                }
+                string memoFileName = Path.Combine(Path.GetDirectoryName(DbfFileName),Path.GetFileNameWithoutExtension(dbfFileName)+memoExtension);
+                if (File.Exists(memoFileName))
+                {
+                    MemoFile = new FileStream(memoFileName, FileMode.Open, FileAccess.Read);
+                    if (memoExtension == ".fpt")
+                    {
+                        var blockSize = new byte[2];
+                        MemoFile.Seek(6, SeekOrigin.Begin);
+                        MemoFile.Read(blockSize, 0, 2);
+                        MemoBlockSize = blockSize[0] << 8 | blockSize[1];
+                    }
+                    foreach(var column in memoColumns)
+                    {
+                        var memoColumn = column as MemoColumn;
+                        memoColumn.MemoBlockSize = MemoBlockSize;
+                        memoColumn.MemoFile = MemoFile;
+                    }
+                }
+                else
+                {
+                    throw new FileNotFoundException("Memo file not found");
+                }
+            }
         }
     }
 }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       

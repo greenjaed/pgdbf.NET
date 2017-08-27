@@ -12,7 +12,7 @@ namespace TestDriver
         static void Main(string[] args)
         {
             DbfExporter exporter = new DbfExporter();
-            exporter.DbfFileName = "test.dbf";
+            exporter.DbfFileName = "dbase_30.dbf";
             foreach (var line in exporter.GetPgScript())
             {
                 Console.WriteLine(line);
